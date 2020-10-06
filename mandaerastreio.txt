@@ -1,0 +1,1880 @@
+import os
+import bson
+from bson.objectid import ObjectId
+import json
+from pymongo import MongoClient, errors
+import time
+from datetime import date, timedelta, datetime
+from decimal import *
+from flask import Flask, session, render_template, request, redirect, url_for, jsonify, escape
+from werkzeug.exceptions import HTTPException
+import sys
+import jinja2
+import numpy as np 
+import pprint
+import socket 
+import pyodbc  
+import pprint
+import random
+from flask_cors import CORS
+import io
+from pathlib import Path
+import urllib3
+import certifi
+
+http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+
+
+
+def retorna_ultimo_idtlan():  
+    try:
+        concluido = 0
+        while concluido ==0:
+            
+            conn_status = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+            cursor_status = conn_status.cursor()
+            cursor_contador = conn_status.cursor()
+
+            cursor_contador.execute('select top 1 idtlan from arfat_rastreio order by idtlan desc') # parametros
+
+            idtlan = ''
+            for registros in cursor_contador:
+                idtlan = registros[0]
+            idtlan_add = int(idtlan)+1
+            concluido = 1
+        
+        return idtlan_add
+    
+    except Exception as er:
+        pass  
+        print('erro ao carregar idtlan..'+str(er))
+
+
+def rastreio_de_postagem_mandae(numero):
+    print('rastreio_de_postagem_mandae...1.0 ' + str(numero))
+
+    r = http.request('GET', 'https://api.mandae.com.br/v2/trackings/' + str(numero), 
+                    headers={'Content-Type': 'application/json', 
+                            'Authorization' : '5407cfeac9cd6f819e6b3f31f7850026'}) # 5407cfeac9cd6f819e6b3f31f7850026   # cb17d72435b4aab45808d7bcc5aec3f2
+    recebido = json.loads(r.data.decode('utf-8')) # ['json']
+    print('>>> eventos do rastreio na Mandae::: ')
+    print(recebido)
+
+    return recebido
+
+#rastreio_de_postagem_mandae('PVIDA3001759')
+#rastreio_de_postagem_mandae('PVIDA1335995')
+
+def retorna_registro_repetido(num_nf, num_ped, filtro):
+    ambiente = 'pro'
+    str_sql = 'select top 100 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+' and a.descricao like '+"'%"+str(filtro)+"%'"+' and a.numped='+str(num_ped)+' and numnf='+str(num_nf)+''
+    lista_ja_atualizadas = []
+    if ambiente == 'teste':
+        ##print('conectando em ambiente de teste...')
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+        cursor_clientes2 = conn_clientes2.cursor()
+        conn_clientes22 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes22.cursor()
+    else:  
+        ##print('conectando em ambiente de producao...')  
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_clientes2 = conn_clientes2.cursor()
+        
+        conn_clientes22 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes22.cursor()
+
+    cursor_clientes2.execute(str_sql)   
+    contador = 0
+    for dados in cursor_clientes2:
+        descricao = dados[5]
+        
+        print('descricao cadastrada:: '+ str(descricao))
+        if str(filtro) in str(descricao):
+            print('NAO CADASTRAR. descricao existente...: '+str(descricao))
+            print('filtro: '+ str(filtro))
+            contador +=1
+            return contador
+    return contador
+        
+        
+        
+
+def string_para_datetime(str_data):
+    import datetime
+    data_filtrada = datetime.datetime.strptime(str(str_data), "%Y-%m-%d %H:%M").replace(tzinfo=datetime.timezone.utc).timestamp()
+    
+    dia = str_data[8:10]
+    mes = str_data[5:7]
+    ano = str_data[0:4]
+    
+    hora = str_data[11:13]
+    minuto = str_data[14:16]
+    #mes = str_data[5:7]
+    
+    #print('dia: ' + str(dia))
+    #print('mes: ' + str(mes))
+    #print('ano: ' + str(ano))
+    #print('hora: ' + str(hora))
+    #print('minuto: ' + str(minuto))
+    data_filtrada = dia+'/'+mes+'/'+ano+' '+hora+':'+minuto
+    #print('data::: ' + data_filtrada)
+    
+
+    return data_filtrada
+
+global listaNumnf
+listaNumnf = []
+
+#str_sql = 'select top 10 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descriccao from arfat_rastreio a inner join arorcv b on a.numped=b.numped where .b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+' and a.numnf ='+str()+' order by datped'
+
+
+def retorna_codigo_rastreio_completo(_numped, numnf):
+    serie_nf = ''
+    conn_rastreio = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+    cursor_rastreio_completo = conn_rastreio.cursor()
+
+
+    cursor_rastreio_completo.execute('select valor from _PARAMETROS where parametro = '+"'"+str('FAT_SERIES_POR_UF')+"'"+'')
+    _valor = ''
+    for series in cursor_rastreio_completo:
+        _valor = series[0]
+        print('valor carregado: ')
+        print(_valor)
+        if str(_valor) == "0":
+            serie_nf = ""
+        else:
+            serie_nf = str(_valor)
+    _serie_ = ''
+    cursor_rastreio_completo.execute('select totgeral, serie from arfat where numnf = '+str(numnf)+' and numped ='+str(_numped))
+    for valores in cursor_rastreio_completo:
+        val_nf = float(valores[0])
+        serie_nf = valores[1]
+        print('serie: ' + str(serie_nf))
+        _serie_ = str(serie_nf)
+    codigo_pvida = str("PVIDA")+str(serie_nf)+str(numnf)
+    print('cod neovida rastreio: ')
+    print(codigo_pvida)
+
+    return str(codigo_pvida), str(_serie_)
+
+
+
+
+
+#retorna_codigo_rastreio_completo('429021', '001799')
+def verifica():    
+    list_p = []
+    conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+    cursor_clientes = conn_clientes.cursor()
+    str_sql_lista_numnf = 'select top 100000 numnf, * from arfat wher numcon like '+"'"+str('PVIDA')+"'" # and a.numnf >329999  #' and a.numnf > 314800 order by a.numnf asc'
+    cursor_clientes.execute(str_sql_lista_numnf)
+    for p in cursor_clientes:
+        numnf = p[0]
+        if not str(numnf) in list_p:
+            list_p.append(numnf)
+
+    lista_update = []
+    for cod in list_p:
+        codigo = 'PVIDA'+str(cod)
+        str_sql_lista_numnf = 'select top 100000 numnf, * from arfat_rastreio where numcon like '+"'"+str(codigo)+"'"+'' # and a.numnf >329999  #' and a.numnf > 314800 order by a.numnf asc'
+        cursor_clientes.execute(str_sql_lista_numnf)
+        if not str(codigo) in lista_update:
+            lista_update.append(codigo)
+
+    print('itens : ' + len(lista_update))
+
+#verifica()
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def busca_dados_para_rastreio():
+    ambiente = 'pro'
+    #str_sql_lista_numnf = 'select top 100000 a.numped, a.numnf, b.tipofrete_descricao, a.datped, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+ ' and a.datped >= (getdate() -14) order by a.datped desc' # and a.numnf >329999  #' and a.numnf > 314800 order by a.numnf asc'
+    str_sql_lista_numnf = 'select a.numped, a.numnf, b.tipofrete_descricao, a.datped, a.numcon, a.DESCRICAO, c.serie from arfat_rastreio a with (nolock), arorcv b with (nolock), arfat c with (nolock) where 1=1 and a.numped=b.numped and a.numped=c.numped and a.seqped = c.seqped and a.numnf = c.numnf and b.status between 100 and 260 and b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+' and a.datped >= (getdate() -10) and a.descricao like '+"'"+str('Manda')+"%'"+'and a.numped not in (select numped from arfat_rastreio j with (nolock) where a.numped=j.numped and a.seqped = j.seqped and j.status_obsv in ('+str('04')+')) order by a.datped, a.numnf, c.serie '
+
+    # where status != nao foi entregue 43814410 140405
+    
+    #str_sql = 'select top 5000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = 280145 order by a.status_obsv'
+    #str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = 280147 order by a.numnf desc'
+    
+    lista_ja_atualizadas = []
+    if ambiente == 'teste':
+        ##print('conectando em ambiente de teste...')
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes2.cursor()
+    else:  
+        ##print('conectando em ambiente de producao...')  
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_inserir_historico = conn_clientes2.cursor()
+
+        # carrega serie da nf 
+        # conn_clientess = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        # cursor_s = conn_clientess.cursor()
+
+    cursor_clientes.execute(str_sql_lista_numnf)
+    
+    global listaNumnf
+    listaNumnf.clear()
+    
+    for dados in cursor_clientes:
+        numnf = dados[1]
+        _numped_nf = dados[0]
+        
+        # serie da nf:
+        _n_serie = retorna_serie_da_nf(numnf, _numped_nf)
+
+        # cod_pvida = str('PVIDA')+str(numnf)
+
+        cod_pvida = str('PVIDA')+str(_n_serie)+str(numnf)
+
+
+
+        if not str(cod_pvida) in listaNumnf:
+            listaNumnf.append(str(cod_pvida))
+            print('cod_pvida: '+str(cod_pvida))
+            
+    print('listaNumnf:::')
+    
+
+    for codigo in listaNumnf:
+        
+        numnf_codigo = str(codigo)[5:]
+        if len(numnf_codigo)<1:
+            numnf_codigo = '000000'
+            
+        str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+' and a.numnf = '+str(numnf_codigo)+' order by a.numnf desc'
+        
+        cursor_clientes.execute(str_sql)
+        
+        for dados in cursor_clientes:
+            numped = dados[0]
+            numnf = dados[1]
+            tipofrete_descricao = dados[2]
+            status_obsv = ''
+            datped = dados[4]
+            descricao = dados[5]
+            numrom = dados[6]
+            idtlan = retorna_ultimo_idtlan()
+            try:
+                status_obsv = dados[3]
+                if str(status_obsv) == 'None':
+                    status_obsv = 99
+                    print('ajust...1')
+                numrom = dados[6]
+                if type(numrom) == None:
+                    numrom = 99              
+            except Exception as err:
+                pass
+                status_obsv = 99
+                numrom = 99
+                print('erro ao carregar dados status_obsv...'+ str(err))
+
+            #print('status_obsv type...:' + str(type(status_obsv)))
+            print('status_obsv...:' + str(status_obsv))
+            if int(status_obsv)<7:
+                codigo_rastreio, n_serie = retorna_codigo_rastreio_completo(numped, numnf)  # 'PVIDA'+numnf
+                try:
+                    json_rastreio = rastreio_de_postagem_mandae(codigo_rastreio)
+                    #gravado = 0
+                    #json_rastreio = rastreio_de_postagem_mandae('PVIDA277970')
+                    # descricao do rastreio:
+                    print('--------------------------------------------')
+                    print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                    print('numcon: '+str(numrom))
+                    if json_rastreio['events']:    
+                        print('status rastreio NAME: '+ str(json_rastreio['events'][0]['name']))
+                        print('status rastreio DESCRIPTION: '+ str(json_rastreio['events'][0]['description']))
+                        print('status rastreio DATETIME: '+ str(json_rastreio['events'][0]['timestamp']))
+                        print('--------------------------------------------')
+                        print(json_rastreio)
+                        print('analisar events...')
+                        if json_rastreio['events']: 
+                            print('analisando events...')   
+                            print(json_rastreio['events'])
+                            gravado = 0
+                            for eventos in json_rastreio['events']:
+                                data_pedido = string_para_datetime(str(eventos['date']))
+                                descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                ja_existe = retorna_registro_repetido(numnf, numped, str(eventos['name']))
+                                if ja_existe == 0:   
+                                    print('CADASTRAR eventos com status khan:') 
+                                    
+                                    if str('Entrega realizada') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Entrega realizada, status: 04')
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Entrega realizada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('04')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')' # n_serie
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual...descricao = descricao2')
+                                    
+                                    if str('Encomenda coletada') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Encomenda coletada, status: 01')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('01')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    if str('Recebida na Mandaê') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Recebida na Mandaê, status: 06')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Recebida na Mandaê')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('06')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    if str('Rota final') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Rota final, status: 09')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Rota final')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR Rota final:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    
+                                    if str('Devolução - Processo em andamento') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Devolução - Processo em andamento, status: 02')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Devolução - Processo em andamento')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR Devolução - Processo em andamento:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+
+
+                                    ###
+                                    if (str('Endereço não localizado') in str(eventos['name']) or str('Devolução - Processo finalizado pela transportadora') in str(eventos['name']) or str('Disponível para retirada na unidade da transportadora') in str(eventos['name']) or str('Devolução - Processo em andamento') in str(eventos['name'])): # 02
+                                        print('===> Encomenda coletada, status: 02')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                meu_numcon = 'PVIDA'+str(numnf)
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+str(codigo_rastreio)+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 02...descricao = descricao2')
+                                
+                                
+                                
+
+                                    if (str('Encomenda em trânsito') in str(eventos['name']) or str('Recebida na unidade da transportadora') in str(eventos['name']) ): # 08
+                                        print('===> Encomenda coletada, status: 08')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('08')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+                                
+                                    if (str('Entrega reprogramada') in str(eventos['name']) or str('Rota final') in str(eventos['name']) ): # 09
+                                        print('===> Encomenda coletada, status: 09')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+                                    
+                                    
+                                    if (str('Extravio') in str(eventos['name'])): # 09
+                                        print('===> Encomenda coletada, status: 10')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('10')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+
+                                    if (str('Destinatário ausente') in str(eventos['name'])): # 09
+                                        print('===> Destinatário ausente, status: 11')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('11')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                            
+                                
+                                    if (str('Análise fiscal') in str(eventos['name'])): # 09
+                                        print('===> Encomenda coletada, status: 12')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('12')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                
+                                
+                                    if (
+                                        (str('Contratempo') in str(eventos['name'])) 
+                                        or (str('Contratempo - Problemas na rota') in str(eventos['name'])) 
+                                            or (str('Estabelecimento fechado ou sem expediente') in str(eventos['name'])) 
+                                                or (str('Outros') in str(eventos['name']))
+                                                    ): # 09
+                                        print('===> Encomenda coletada, status: 99')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('99')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                
+                
+                
+                                    #if (str('Análise fiscal') in str(eventos['name'])):
+                                    if (gravado == 0):
+                                        try:
+                                            print('===> grava sem status KHAN...')
+                                            #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                            data_pedido = string_para_datetime(str(eventos['date']))
+                                            descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped, serie) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str("99")+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+', '+"'"+str(n_serie)+"'"+')'
+                                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                            cursor_inserir_historico.commit() 
+                                            usuario = 'MASTER_SYS'
+                                            seqped=0
+                                            print( 'arfat historico log...')
+                                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                            cursor_inserir_historico.commit() 
+                                            gravado = 1   
+                                            print('===> grava sem status KHAN...concluido.')
+                                        except Exception as er:
+                                            pass    
+                                            print('erro em gravar sem status khan...: ' + str(er))
+
+                                                            
+                            lista_ja_atualizadas.append(numnf) 
+                        
+                    else:
+                        print('-=> nao possui events.')  
+
+
+                except Exception as err:
+                    pass
+                    print('erro em postagem rastreio...' + str(err))
+                
+
+
+
+
+def retorna_serie_da_nf(nf, numped):
+    print('carregaserie nf...')
+    serie_nf = ''
+    
+    conn_clientess = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+    cursor_s = conn_clientess.cursor()
+
+    # ===============================================================================
+    # carrega numero de serie na NF e do NUMPED
+    cursor_s.execute('select top 10 serie from arfat where numnf ='+str(nf)+' and numped = '+str(numped))
+    for series in cursor_s:
+        print('carregando serie da nf>>...: '+str(nf))
+        serie_nf = series[0]
+        print('==== serie da nf>>...: '+str(serie_nf))
+    # ================================================================================
+    # verifica se flag está ativa para usar o num de serie:  valor = 1 em _parametros 
+    parametro = 'FAT_SERIES_POR_UF'
+    cursor_s.execute('select valor from _PARAMETROS where PARAMETRO ='+"'"+str(parametro)+"'"+'')
+    serie_ativa = 0
+    for itens in cursor_s:
+        valor = str(itens[0])
+        if str(valor) == "0":
+            serie_nf = ""
+
+
+
+
+    return str(serie_nf)
+
+def busca_dados_para_rastreio_nf_com_serie():
+    ambiente = 'pro'
+    str_sql_lista_numnf = 'select top 100000 a.numped, a.numnf, b.tipofrete_descricao, a.datped, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+ ' and a.datped >= (getdate() -10)  order by a.numnf desc'  # and a.numnf = 332823 ' and a.numnf > 314800 order by a.numnf asc'
+    # where status != nao foi entregue
+    
+    #str_sql = 'select top 5000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = 280145 order by a.status_obsv'
+    #str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = 280147 order by a.numnf desc'
+    
+    lista_ja_atualizadas = []
+    if ambiente == 'teste':
+        ##print('conectando em ambiente de teste...')
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes2.cursor()
+    else:  
+        ##print('conectando em ambiente de producao...')  
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_inserir_historico = conn_clientes2.cursor()
+
+        # carrega serie da nf 
+        conn_clientess = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_s = conn_clientess.cursor()
+
+    cursor_clientes.execute(str_sql_lista_numnf)
+    
+    global listaNumnf
+    listaNumnf.clear()
+    
+    for dados in cursor_clientes:
+        numnf = dados[1]
+        __numped = dados[0]
+        # serie da nf:
+        '''
+        serie_nf = ''
+        cursor_s.execute('select top 10 serie from arfat where numnf ='+str(numnf)+'')
+        for series in cursor_s:
+            print('carregando serie da nf...: '+str(numnf))
+            serie_nf = series[0]
+        '''
+        serie_nf = retorna_serie_da_nf(numnf)
+        cod_pvida = str('PVIDA')+str(serie_nf)+str(numnf)
+        if not str(cod_pvida) in listaNumnf:
+            listaNumnf.append(str(cod_pvida))
+            print('cod_pvida: '+str(cod_pvida))
+            
+    print('listaNumnf:::')
+    
+
+    for codigo in listaNumnf:
+        
+        numnf_codigo = str(codigo)[5:]
+        if len(numnf_codigo)<1:
+            numnf_codigo = '000000'
+            
+        str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Manda')+"%'"+' and a.numnf = '+str(numnf_codigo)+' order by a.numnf desc'
+        
+        cursor_clientes.execute(str_sql)
+        
+        for dados in cursor_clientes:
+            numped = dados[0]
+            numnf = dados[1]
+            serie_nf2 = retorna_serie_da_nf(numnf, numped)
+            tipofrete_descricao = dados[2]
+            status_obsv = ''
+            datped = dados[4]
+            descricao = dados[5]
+            numrom = dados[6]
+            idtlan = retorna_ultimo_idtlan()
+            try:
+                status_obsv = dados[3]
+                if str(status_obsv) == 'None':
+                    status_obsv = 99
+                    print('ajust...1')
+                numrom = dados[6]
+                if type(numrom) == None:
+                    numrom = 99              
+            except Exception as err:
+                pass
+                status_obsv = 99
+                numrom = 99
+                print('erro ao carregar dados status_obsv...'+ str(err))
+
+            #print('status_obsv type...:' + str(type(status_obsv)))
+            print('status_obsv...:' + str(status_obsv))
+            if int(status_obsv)<7:
+                codigo_rastreio = 'PVIDA'+serie_nf2+numnf
+                try:
+                    json_rastreio = rastreio_de_postagem_mandae(codigo_rastreio)
+                    #gravado = 0
+                    #json_rastreio = rastreio_de_postagem_mandae('PVIDA277970')
+                    # descricao do rastreio:
+                    print('--------------------------------------------')
+                    print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                    print('numcon: '+str(numrom))
+                    if json_rastreio['events']:    
+                        print('status rastreio NAME: '+ str(json_rastreio['events'][0]['name']))
+                        print('status rastreio DESCRIPTION: '+ str(json_rastreio['events'][0]['description']))
+                        print('status rastreio DATETIME: '+ str(json_rastreio['events'][0]['timestamp']))
+                        print('--------------------------------------------')
+                        print(json_rastreio)
+                        print('analisar events...')
+                        if json_rastreio['events']: 
+                            print('analisando events...')   
+                            print(json_rastreio['events'])
+                            gravado = 0
+                            for eventos in json_rastreio['events']:
+                                data_pedido = string_para_datetime(str(eventos['date']))
+                                descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                ja_existe = retorna_registro_repetido(numnf, numped, str(eventos['name']))
+                                if ja_existe == 0:   
+                                    print('CADASTRAR eventos com status khan:') 
+                                    
+                                    if str('Entrega realizada') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Entrega realizada, status: 04')
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Entrega realizada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('04')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual...descricao = descricao2')
+                                    
+                                    if str('Encomenda coletada') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Encomenda coletada, status: 01')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('01')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    if str('Recebida na Mandaê') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Recebida na Mandaê, status: 06')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Recebida na Mandaê')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('06')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    if str('Rota final') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Rota final, status: 09')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Rota final')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR Rota final:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+                                    
+                                    
+                                    if str('Devolução - Processo em andamento') in str(eventos['name']): # Encomenda coletada
+                                        print('===> Devolução - Processo em andamento, status: 02')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Devolução - Processo em andamento')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR Devolução - Processo em andamento:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 06...descricao = descricao2')
+
+
+                                    ###
+                                    if (str('Endereço não localizado') in str(eventos['name']) or str('Devolução - Processo finalizado pela transportadora') in str(eventos['name']) or str('Disponível para retirada na unidade da transportadora') in str(eventos['name']) or str('Devolução - Processo em andamento') in str(eventos['name'])): # 02
+                                        print('===> Encomenda coletada, status: 02')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                meu_numcon = 'PVIDA'+str(numnf)
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+str(codigo_rastreio)+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 02...descricao = descricao2')
+                                
+                                
+                                
+
+                                    if (str('Encomenda em trânsito') in str(eventos['name']) or str('Recebida na unidade da transportadora') in str(eventos['name']) ): # 08
+                                        print('===> Encomenda coletada, status: 08')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('08')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+                                
+                                    if (str('Entrega reprogramada') in str(eventos['name']) or str('Rota final') in str(eventos['name']) ): # 09
+                                        print('===> Encomenda coletada, status: 09')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+                                    
+                                    
+                                    if (str('Extravio') in str(eventos['name'])): # 09
+                                        print('===> Encomenda coletada, status: 10')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('10')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                    
+
+                                    if (str('Destinatário ausente') in str(eventos['name'])): # 09
+                                        print('===> Destinatário ausente, status: 11')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('11')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                            
+                                
+                                    if (str('Análise fiscal') in str(eventos['name'])): # 09
+                                        print('===> Encomenda coletada, status: 12')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('12')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                                
+                                
+                                    if (
+                                        (str('Contratempo') in str(eventos['name'])) 
+                                        or (str('Contratempo - Problemas na rota') in str(eventos['name'])) 
+                                            or (str('Estabelecimento fechado ou sem expediente') in str(eventos['name'])) 
+                                                or (str('Outros') in str(eventos['name']))
+                                                    ): # 09
+                                        print('===> Encomenda coletada, status: 99')
+                                        #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                        data_pedido = string_para_datetime(str(eventos['date']))
+                                        descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                        
+                                        # atualiza arfat_historico
+                                        if not str(descricao) == str(descricao2):
+                                            ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                                            if ja_existe == 0:   
+                                                print('CADASTRAR:') 
+                                                print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                                                print('comparativo de registros para registro')
+                                                print(descricao)
+                                                print(descricao2)
+                                                str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('99')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                                cursor_inserir_historico.commit() 
+                                                usuario = 'MASTER_SYS'
+                                                seqped=0
+                                                print( 'arfat historico log...')
+                                                str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                                cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                                cursor_inserir_historico.commit() 
+                                                gravado = 1
+                                                #lista_ja_atualizadas.append(numnf)
+                                            else:
+                                                print('resultado igual 08...descricao = descricao2')
+                
+                
+                
+                                    #if (str('Análise fiscal') in str(eventos['name'])):
+                                    if (gravado == 0):
+                                        try:
+                                            print('===> grava sem status KHAN...')
+                                            #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                                            data_pedido = string_para_datetime(str(eventos['date']))
+                                            descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str("99")+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+codigo_rastreio+"'"+', '+str(idtlan)+', '+str(0)+')'
+                                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                                            cursor_inserir_historico.commit() 
+                                            usuario = 'MASTER_SYS'
+                                            seqped=0
+                                            print( 'arfat historico log series...')
+                                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                                            cursor_inserir_historico.commit() 
+                                            gravado = 1   
+                                            print('===> grava sem status KHAN...concluido.')
+                                        except Exception as er:
+                                            pass    
+                                            print('erro em gravar sem status khan series...: ' + str(er))
+
+                                                            
+                            lista_ja_atualizadas.append(numnf) 
+                        
+                    else:
+                        print('-=> nao possui eventsseries.')  
+
+
+                except Exception as err:
+                    pass
+                    print('erro em postagem rastreio nfs com series...' + str(err))
+                
+
+# PVIDA1332823   and a.numnf = 333112
+
+
+
+#rastreio_de_postagem_mandae('PVIDA1333115')
+
+busca_dados_para_rastreio()
+
+'''      
+
+while True:
+    # busca_dados_para_rastreio()
+    # busca_dados_para_rastreio_nf_com_serie()
+    busca_dados_para_rastreio() # atualizado para carregamento com serie da nf e numped, caso valor do parametro >0
+    import datetime
+    agora = datetime.datetime.today()
+    print('finalizado _agora: ' + str(agora))
+    time.sleep(10800)    
+     
+'''
+ 
+
+
+#json_rastreio = rastreio_de_postagem_mandae('PVIDA331229')
+#print(json_rastreio)
+
+
+
+'''
+limpa_historico()    
+limpa_historico_sem_datped()     
+'''
+
+'''
+busca_dados_para_rastreio()
+import datetime
+agora = datetime.datetime.today()
+print('agora: ' + str(agora))    
+
+'''
+
+'''    
+limpa_historico()
+limpa_historico_sem_datped()
+'''
+        
+def limpa_historico():
+    ambiente = 'pro'
+    if ambiente == 'teste':
+        ##print('conectando em ambiente de teste...')
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes2.cursor()
+    else:  
+        ##print('conectando em ambiente de producao...')  
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_clientes = conn_clientes.cursor()
+        
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_inserir_historico = conn_clientes2.cursor()
+    #str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = '+str(numnf_codigo)+' order by a.numnf desc'
+    
+    
+    sql_limpa_repetidos = 'WITH CTE([numped], [status_obsv], [datped], duplicatecount) AS (SELECT [numped], [status_obsv], [datped], ROW_NUMBER() OVER(PARTITION BY [numped], [status_obsv], [datped] ORDER BY numped) AS DuplicateCount FROM [SAAS_110905_HERMES_NEOVIDA].[dbo].arfat_rastreio ) delete FROM CTE WHERE duplicatecount > 1;'
+    cursor_inserir_historico.execute(sql_limpa_repetidos)
+    cursor_inserir_historico.commit()
+
+    
+    print('tab hist deletada...')
+    
+    
+    
+limpa_historico()
+
+
+
+
+
+def limpa_historico_sem_datped():
+    ambiente = 'pro'
+    if ambiente == 'teste':
+        ##print('conectando em ambiente de teste...')
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HOMOLOG_PURAVIDA; UID=externo.khan; PWD=kh@n2016;' ) # Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=HERMESQUALIDADE1; UID=externo.khan; PWD=kh@n2016;
+        cursor_clientes = conn_clientes.cursor()
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        
+        cursor_inserir_historico = conn_clientes2.cursor()
+    else:  
+        ##print('conectando em ambiente de producao...')  
+        conn_clientes = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_clientes = conn_clientes.cursor()
+        
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_inserir_historico = conn_clientes2.cursor()
+    #str_sql = 'select top 3000 a.numped, a.numnf, b.tipofrete_descricao, a.status_obsv, a.datped, a.descricao, a.numcon from arfat_rastreio a inner join arorcv b on a.numped=b.numped where b.tipofrete_descricao like '+"'%"+str('Mandae')+"%'"+' and a.numnf = '+str(numnf_codigo)+' order by a.numnf desc'
+    
+    
+    sql_limpa_repetidos = 'WITH CTE([numped], [status_obsv], duplicatecount) AS (SELECT [numped], [status_obsv], ROW_NUMBER() OVER(PARTITION BY [numped], [status_obsv] ORDER BY numped) AS DuplicateCount FROM [SAAS_110905_HERMES_NEOVIDA].[dbo].arfat_rastreio ) delete FROM CTE WHERE duplicatecount > 1;'
+    cursor_inserir_historico.execute(sql_limpa_repetidos)
+    cursor_inserir_historico.commit()
+
+    
+    print('tab hist deletada...')
+    
+    
+    
+
+
+
+
+
+
+# rastreio e salva historico
+def rastreia_e_salva(codigo):
+    try:
+        conn_clientes2 = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+        cursor_inserir_historico = conn_clientes2.cursor()
+
+
+        lista_ja_atualizadas = []
+
+
+        json_rastreio = rastreio_de_postagem_mandae(codigo)
+        codigo_sem_serie_1 = str(codigo)[0:5]
+        codigo_sem_serie_2 = str(codigo)[6:]
+
+        codigo_sem_serie = str(codigo_sem_serie_1) + str(codigo_sem_serie_2)
+
+        print('cod com serie========= ' + str(codigo))
+        print('- serie p 1: ' + str(codigo_sem_serie_1))
+        print('- serie p 2: ' + str(codigo_sem_serie_2))
+        print('cod SEM serie========= ' + str(codigo_sem_serie))
+
+        #json_rastreio = rastreio_de_postagem_mandae('PVIDA277970')
+        # descricao do rastreio:
+        print('--------------------------------------------')
+        print('--------------------------------------------')
+        print(json_rastreio)
+        print('ultimo evento deste rastreio:')
+        try:
+                
+            if json_rastreio['events']:    
+                print(json_rastreio['events'][-1])
+            else:
+                print('sem events...')
+
+        except Exception as identifier:
+            pass
+        gravado = 0
+        numnf = str(codigo)[-6:]
+        #eventos = json_rastreio['events'][-1]
+        tipofrete_descricao = 'Mandae -> Economico'
+        numped = '417461'
+        seqped = '0'
+        #data_pedido = string_para_datetime(str(eventos['date'])[0:-3]+':00')
+        descricao = '' # 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+        numrom = codigo  
+        #idtlan = retorna_ultimo_idtlan()    
+        for eventos in json_rastreio['events']:
+            idtlan = retorna_ultimo_idtlan()  
+            data_pedido = string_para_datetime(str(eventos['date'])) # [0:-3]+':00'
+            if not numnf in lista_ja_atualizadas:    
+                if str('Entrega realizada') in str(eventos['name']): 
+                    print('') 
+                    print('===> ***Entrega realizada, status: 04')
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Entrega realizada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('04')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+str(numrom)+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual...descricao = descricao2')
+                
+                if str('Encomenda coletada') in str(eventos['name']): # Encomenda coletada
+                    print('')
+                    print('===> Encomenda coletada, status: 06 ======')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    print('CADASTRAR 1: Encomenda coletada, status: 06') 
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        print('CADASTRAR 2: Encomenda coletada, status: 06') 
+                        ja_existe = 0 # retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        print('CADASTRAR 3: Encomenda coletada, status: 06') 
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+str(numnf)+', '+"'"+str('06')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+str(numrom)+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 06...descricao = descricao2')
+                
+                if str('Recebida na Mandaê') in str(eventos['name']): # Encomenda coletada
+                    print('')
+                    print('===> Recebida na Mandaê, status: 06')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Recebida na Mandaê')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('06')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 06...descricao = descricao2')
+                
+                if str('Rota final') in str(eventos['name']): # Encomenda coletada
+                    print('')
+                    print('===> Rota final, status: 09')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Rota final')
+                        if ja_existe == 0:   
+                            print('CADASTRAR Rota final:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 06...descricao = descricao2')
+                
+                
+                if str('Devolução - Processo em andamento') in str(eventos['name']): # Encomenda coletada
+                    print('')
+                    print('===> Devolução - Processo em andamento, status: 02')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Devolução - Processo em andamento')
+                        if ja_existe == 0:   
+                            print('CADASTRAR Devolução - Processo em andamento:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 06...descricao = descricao2')
+
+
+                ###
+                if (str('Endereço não localizado') in str(eventos['name']) or str('Devolução - Processo finalizado pela transportadora') in str(eventos['name']) or str('Disponível para retirada na unidade da transportadora') in str(eventos['name']) or str('Devolução - Processo em andamento') in str(eventos['name'])): # 02
+                    print('')
+                    print('===> Endereço não localizado, status: 02')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('02')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual ja cadastrado em historico 02...descricao = descricao2')
+            
+            
+            
+
+                if (str('Encomenda em trânsito') in str(eventos['name']) or str('Recebida na unidade da transportadora') in str(eventos['name']) ): # 08
+                    print('')
+                    print('===> Encomenda coletada, status: 08')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('08')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+                
+                '''
+                if (str('Entrega reprogramada') in str(eventos['name']) or str('Rota final') in str(eventos['name']) ): # 09
+                    print('')
+                    print('===> Entrega reprogramada ou Rota final, status: 09')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('09')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+                
+                '''
+                
+                if (str('Extravio') in str(eventos['name'])): # 09
+                    print('')
+                    print('===> Encomenda coletada, status: 10')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('10')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+                
+
+                if (str('Destinatário ausente') in str(eventos['name'])): # 09
+                    print('')
+                    print('===> Encomenda coletada, status: 11')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('11')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+                        
+            
+                if (str('Análise fiscal') in str(eventos['name'])): # 09
+                    print('')
+                    print('===> Encomenda coletada, status: 12')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('12')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+            
+            
+                if (
+                    (str('Contratempo') in str(eventos['name'])) 
+                    or (str('Contratempo - Problemas na rota') in str(eventos['name'])) 
+                        or (str('Estabelecimento fechado ou sem expediente') in str(eventos['name'])) 
+                            or (str('Outros') in str(eventos['name']))
+                                ): # 09
+                    print('===> Encomenda coletada, status: 99')
+                    #data_pedido = str(datped.day)+'/'+ str(datped.month) +'/'+ str(datped.year) + ' ' + str(datped.hour) + ':' + str(datped.minute) + ':' + str(datped.second)
+                    data_pedido = string_para_datetime(str(eventos['date']))
+                    descricao2 = 'Mandae -> '+str(eventos['name']) + ' em: ' + str(data_pedido) + ' : ' + str(tipofrete_descricao)
+                    
+                    # atualiza arfat_historico
+                    if not str(descricao) == str(descricao2):
+                        ja_existe = retorna_registro_repetido(numnf, numped, 'Encomenda coletada')
+                        if ja_existe == 0:   
+                            print('CADASTRAR:') 
+                            print('NF: '+ str(numnf) + ' numped: '+str(numped))
+                            print('comparativo de registros para registro')
+                            print(descricao)
+                            print(descricao2)
+                            str_sql_update_arfat_rastreio = 'insert into arfat_rastreio(numped, numnf, status_obsv, datped, descricao, numcon, idtlan, seqped) values('+str(numped)+', '+"'"+str(numnf)+"'"+', '+"'"+str('99')+"'"+', CAST('+"'"+str(eventos['date'])+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+', '+"'"+numrom+"'"+', '+str(idtlan)+', '+str(0)+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_rastreio)
+                            cursor_inserir_historico.commit() 
+                            usuario = 'MASTER_SYS'
+                            seqped=0
+                            print( 'arfat historico log...')
+                            str_sql_update_arfat_historico = 'insert into arfat_historico(usuario, numped, seqped, dathistorico, obsv) values('+"'"+str(usuario)+"'"+', '+str(numped)+', '+str(seqped)+', CAST('+"'"+data_pedido+"'"+' AS DATETIME), '+"'"+str(descricao2)+"'"+')'
+                            cursor_inserir_historico.execute(str_sql_update_arfat_historico)
+                            cursor_inserir_historico.commit() 
+                            gravado = 1
+                            #lista_ja_atualizadas.append(numnf)
+                        else:
+                            print('resultado igual 08...descricao = descricao2')
+
+            
+        # atualiza arfat_rastreio
+
+    except Exception as err:
+        pass
+        print('erro em postagem rastreio...' + str(err))
+    
+
+
+
+'''
+rastreia_e_salva('PVIDA1333112')
+rastreia_e_salva('PVIDA1332778')
+rastreia_e_salva('PVIDA1333115')
+limpa_historico()
+'''
+
+#limpa_historico()
+
+# rastreia_e_salva('PVIDA6000336')
+#rastreia_e_salva('PVIDA334926')
+#rastreia_e_salva('PVIDA1336094')
+
+#rastreia_e_salva('PVIDA1335995')
+
+#rastreia_e_salva('PVIDA3001027')
+# rastreia_e_salva('PVIDA3000757')
+
+#rastreia_e_salva('PVIDA4001158')
+#rastreia_e_salva('PVIDA4001113')
+
+# rastreia_e_salva('PVIDA3001841')
+# rastreia_e_salva('PVIDA7000197')
+
+
+# campo serie em arfat_rastreio: cursor_atualiza_campo_serie.execute('select numcon from arfat_rastreio where numcon like '+"'"+str('PVIDA')+"'"+'')
+def atualiza_campo_serie():
+    print('atualiza campo serie...')
+    conn_clientes_atualiza_campo_serie = pyodbc.connect('Driver={SQL Server}; Server=saas2017.khan.com.br,1435; Database=SAAS_110905_HERMES_NEOVIDA; UID=externo.khan; PWD=kh@n2016;' )
+    cursor_atualiza_campo_serie = conn_clientes_atualiza_campo_serie.cursor()
+
+    cursor_atualiza_campo_serie.execute('select distinct numcon from arfat_rastreio where numcon like '+"'"+str('PVIDA')+"'"+'')
+
+    lista_codigos = []
+
+    for itens in cursor_atualiza_campo_serie:
+        codigo = itens[0]
+        lista_codigos.append(codigo)
+    
+
+
+
